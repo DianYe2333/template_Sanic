@@ -2,10 +2,13 @@
 import argparse
 import os
 from multiprocessing import Process
+from rediscluster import RedisCluster
 import logging
 
 import server
+import backend
 import src.config as cfg
+
 
 def create_argument_parser():
     parser = argparse.ArgumentParser(prog='audio_quality_check')
@@ -22,9 +25,20 @@ def create_argument_parser():
     return parser
 
 
+def init_redis_cluster():
+    # Redis集群模式
+    try:
+        redisconn = RedisCluster(startup_nodes=cfg.RedisNodes, password=cfg.RedisPass, decode_responses=True)
+    except Exception as e:
+        print("Redis Connect Error!{}".format(e))
+        return None
+
+    return redisconn
+
+
 # sanic对外服务
-def server_setup(args, config_dict,redis_client):
-    app = server.create_app(config_dict,redis_client)
+def server_setup(args, config_dict, redis_client):
+    app = server.create_app(config_dict, redis_client)
     app.run(
         host=args.host,
         port=args.port,
@@ -33,18 +47,21 @@ def server_setup(args, config_dict,redis_client):
     )
 
 
-
 def main():
     arg_parser = create_argument_parser()
     args = arg_parser.parse_args()
 
-    # 启动sanic服务
-    server_setup(args, cfg.sanic_config_dict)
+    # 初始化Redis集群连接
+    redis_client = init_redis_cluster()
 
+    # 启动sanic服务
+    process_server = Process(target=server_setup, args=(args, cfg.sanic_config_dict, redis_client,))
+    process_server.start()
+
+    # 启动后端处理进程
+    process_backend = []
+    process_backend.append(Process(target=backend.func, args=(redis_client,cfg.task_prefix, cfg.result_prefix,)))
+    [each.start() for each in process_backend]
 
 if __name__ == '__main__':
     main()
-
-
-
-
